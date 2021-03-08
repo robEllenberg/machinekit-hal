@@ -23,6 +23,7 @@ pin_ptr in u32 smooth_steps=2
     """Smooth out acceleration this many periods before reaching input or
 max/min limit.  Higher values avoid oscillation, but will accelerate
 slightly more slowly.""";
+variable double maxv_internal;
 variable double in_pos_old;
 variable double out_old;
 function _;
@@ -52,6 +53,18 @@ license "GPL";
 #define VF_GIVEN_VI_A_T(vi,a,t) ((vi) + (a)*(t))
 // A fudge amount for division errors
 #define EPSILON 1e-9
+
+
+double rate_limited_displacement(
+    double current,
+    double goal,
+    double rate_limit,
+    double dt) {
+    const double dgoal = goal - current;
+    const double dmax = rate_limit * dt;
+    return rtapi_fmin(rtapi_fmax(dgoal, -dmax), dmax);
+}
+
 
 FUNCTION(_) {
     double in_pos_lim, in_vel;
@@ -85,10 +98,12 @@ FUNCTION(_) {
     //
     // Input velocity
     in_vel = (gf(in) - in_pos_old) / fperiod;
-    //
+    // Adjust the internal max velocity limit based on user-requested max vel, respecting current max acceleration
+    maxv_internal += rate_limited_displacement(maxv_internal, gf(maxv), gf(maxa), fperiod);
+
     // Most negative/positive velocity reachable in one period
-    min_vel = rtapi_fmax(VF_GIVEN_VI_A_T(gf(out_vel), -gf(maxa), fperiod), -gf(maxv));
-    max_vel = rtapi_fmin(VF_GIVEN_VI_A_T(gf(out_vel),  gf(maxa), fperiod),  gf(maxv));
+    min_vel = rtapi_fmax(VF_GIVEN_VI_A_T(gf(out_vel), -gf(maxa), fperiod), -maxv_internal);
+    max_vel = rtapi_fmin(VF_GIVEN_VI_A_T(gf(out_vel),  gf(maxa), fperiod),  maxv_internal);
     // Most negative/positive position reachable in one period
     // - cur. pos + (distance to reach min/max vel in one period)
     min_pos = gf(out) + min_vel * fperiod;
